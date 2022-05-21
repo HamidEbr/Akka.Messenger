@@ -1,11 +1,4 @@
-﻿using Akka.Actor;
-using Akka.Cluster.Sharding;
-using Service.Api.Actors;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using Akka.Cluster.Sharding;
 
 namespace Service.Api.Helper
 {
@@ -29,42 +22,21 @@ namespace Service.Api.Helper
 
         public override string EntityId(object message)
         {
-            switch (message)
+            return message switch
             {
-                case ShardRegion.StartEntity start: return start.EntityId;
-                case ShardEnvelope e: return e.EntityId;
-            }
-
-            return null;
+                ShardRegion.StartEntity start => start.EntityId,
+                ShardEnvelope e => e.EntityId,
+                _ => string.Empty,
+            };
         }
 
-        //public override object EntityMessage(object message)
-        //{
-        //    switch (message)
-        //    {
-        //        case ShardEnvelope e: return ProcessUserMessages(e.Payload);
-        //        default:
-        //            return message;
-        //    }
-        //}
-
-        //    public override string ShardId(object message)
-        //    {
-        //        switch (message)
-        //        {
-        //            case ShardEnvelope e: return e.EntityId;
-        //        }
-        //        return base.ShardId(message);
-        //    }
-
-        //    private object ProcessUserMessages(object payload)
-        //    {
-        //        switch (payload)
-        //        {
-        //            case ProcessesCoordinatorActor.RawSendMessage m: return m;
-        //            default: return payload;
-        //        }
-        //        throw new NotImplementedException();
-        //    }
+        public override object EntityMessage(object message)
+        {
+            return message switch
+            {
+                ShardEnvelope e => e.Payload,
+                _ => message,
+            };
+        }
     }
 }

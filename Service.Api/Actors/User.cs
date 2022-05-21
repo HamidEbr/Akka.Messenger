@@ -1,21 +1,25 @@
 ﻿using Akka.Actor;
+using Service.Api.Helper;
 using Service.Api.Models;
+using Service.Api.Services;
 
 namespace Service.Api.Actors
 {
-    public class User : BaseActor
+    public class User : ReceiveActor
     {
         private Dictionary<Guid, SendMessage> _sentItems;
         private Dictionary<Guid, ReciveMessage> _rcvdItems;
+        private readonly IMessageSessionHandler _messageSessionHandler;
         
         public string Phone { get; }
 
-        public User(string userPhone)
+
+        public User(IMessageSessionHandler messageSessionHandler, string userPhone)
         {
             Phone = userPhone;
+            _messageSessionHandler = messageSessionHandler;
             _sentItems = new Dictionary<Guid, SendMessage>();
             _rcvdItems = new Dictionary<Guid, ReciveMessage>();
-
             UserAvailable();
         }
 
@@ -26,14 +30,16 @@ namespace Service.Api.Actors
             Receive<SendMessage>(message =>
             {
                 _sentItems.Add(message.Message.Id, message);
-                message.Destination.Tell(new ReciveMessage(Self, Phone, message.Message));
+                _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(message.DestinationPhone, new ReciveMessage(Phone, message.Message)));
+                Sender.Tell(message.Message.Id);
             });
 
             Receive<ReciveMessage>(message =>
             {
                 message.SetAsDelivered();
                 _rcvdItems.Add(message.Message.Id, message);
-                Sender.Tell(new DeliverMessage(message.Message.Id));
+                _messageSessionHandler.ShardRegion.Tell(
+                    new ShardEnvelope(message.SenderPhone, new DeliverMessage(message.Message.Id)));
             });
 
             Receive<DeliverMessage>(message =>
@@ -50,7 +56,8 @@ namespace Service.Api.Actors
             {
                 if (_sentItems.ContainsKey(message.MessageId))
                 {
-                    message.DestinationActor.Tell(new ReciveEditMessage(message.MessageId, message.Message));
+                    _messageSessionHandler.ShardRegion.Tell(
+                        new ShardEnvelope(message.DestinationPhone, new ReciveEditMessage(message.MessageId, message.Message)));
                 }
             });
 
@@ -80,7 +87,7 @@ namespace Service.Api.Actors
                 foreach(var msg in newMessages)
                 {
                     msg.SetAsRead();
-                    msg.SourceActor.Tell(new AckReadNewMessages(msg.Message.Id));
+                    _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewMessages(msg.Message.Id)));
                 }
 
                 var result = newMessages.Select(a => new MessageResponse()
@@ -109,7 +116,7 @@ namespace Service.Api.Actors
                     if (msg.Message.Status != Message.MessageStatus.Read)
                     {
                         msg.SetAsRead();
-                        msg.SourceActor.Tell(new AckReadNewMessages(msg.Message.Id));
+                        _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewMessages(msg.Message.Id)));
                     }
                 }
 
@@ -172,17 +179,11 @@ namespace Service.Api.Actors
 
         public class SendMessage : BaseMessage
         {
-            public SendMessage(IActorRef destination, Message message) : base(message)
-            {
-                Destination = destination;
-            }
-
             public SendMessage(string destinationPhone, Message message) : base(message)
             {
                 DestinationPhone = destinationPhone;
             }
 
-            public IActorRef Destination { get; }
             public string DestinationPhone { get; }
         }
 
@@ -198,13 +199,11 @@ namespace Service.Api.Actors
 
         public class ReciveMessage : BaseMessage
         {
-            public ReciveMessage(IActorRef sourceActor, string sourcePhone, Message message) : base(message)
+            public ReciveMessage(string senderPhone, Message message) : base(message)
             {
-                SourceActor = sourceActor;
-                SenderPhone = sourcePhone;
+                SenderPhone = senderPhone;
             }
 
-            public IActorRef SourceActor { get; set; }
             public string SenderPhone { get; }
         }
 
@@ -214,16 +213,16 @@ namespace Service.Api.Actors
 
         public class EditMessage
         {
-            public EditMessage(Guid messageId, IActorRef destinationActor, string message)
+            public EditMessage(Guid messageId, string destinationPhone, string message)
             {
                 MessageId = messageId;
                 Message = message;
-                DestinationActor = destinationActor;
+                DestinationPhone = destinationPhone;
             }
 
             public Guid MessageId { get; }
             public string Message { get; set; }
-            public IActorRef DestinationActor { get; set; }
+            public string DestinationPhone { get; set; }
         }
 
         public class ReciveEditMessage
@@ -256,22 +255,16 @@ namespace Service.Api.Actors
 
         public sealed class ReadAllMessages
         {
-            public ReadAllMessages(string sourcePhone)
+            public ReadAllMessages()
             {
-                SourcePhone = sourcePhone;
             }
-
-            public string SourcePhone { get; }
         }
 
         public sealed class ReadNewMessages
         {
-            public ReadNewMessages(string sourcePhone)
+            public ReadNewMessages()
             {
-                SourcePhone = sourcePhone;
             }
-
-            public string SourcePhone { get; }
         }
 
         public sealed class AckReadNewMessages

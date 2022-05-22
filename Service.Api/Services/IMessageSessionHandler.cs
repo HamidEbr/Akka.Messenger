@@ -5,7 +5,7 @@ namespace Service.Api.Services
     public interface IMessageSessionHandler
     {
         IActorRef ShardRegion { get; }
-        void Handle(object msg);
+        void Tell(object msg);
         Task<T> Ask<T>(object msg);
     }
 }

@@ -7,8 +7,8 @@ namespace Service.Api.Actors
 {
     public class User : ReceiveActor
     {
-        private Dictionary<Guid, SendMessage> _sentItems;
-        private Dictionary<Guid, ReciveMessage> _rcvdItems;
+        private Dictionary<Guid, SendSmsMessage> _sentSmse;
+        private Dictionary<Guid, ReciveSmsMessage> _rcvdSms;
         private readonly IMessageSessionHandler _messageSessionHandler;
         
         public string Phone { get; }
@@ -18,8 +18,8 @@ namespace Service.Api.Actors
         {
             Phone = userPhone;
             _messageSessionHandler = messageSessionHandler;
-            _sentItems = new Dictionary<Guid, SendMessage>();
-            _rcvdItems = new Dictionary<Guid, ReciveMessage>();
+            _sentSmse = new Dictionary<Guid, SendSmsMessage>();
+            _rcvdSms = new Dictionary<Guid, ReciveSmsMessage>();
             UserAvailable();
         }
 
@@ -27,119 +27,138 @@ namespace Service.Api.Actors
         {
             #region Send
 
-            Receive<SendMessage>(message =>
+            Receive<SendSmsMessage>(message =>
             {
-                _sentItems.Add(message.Message.Id, message);
-                _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(message.DestinationPhone, new ReciveMessage(Phone, message.Message)));
-                Sender.Tell(message.Message.Id);
+                _sentSmse.Add(message.Sms.Id, message);
+                _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(message.DestinationPhone, new ReciveSmsMessage(Phone, message.Sms)));
+                Sender.Tell(message.Sms.Id);
             });
 
-            Receive<ReciveMessage>(message =>
+            Receive<ReciveSmsMessage>(message =>
             {
                 message.SetAsDelivered();
-                _rcvdItems.Add(message.Message.Id, message);
+                _rcvdSms.Add(message.Sms.Id, message);
                 _messageSessionHandler.ShardRegion.Tell(
-                    new ShardEnvelope(message.SenderPhone, new DeliverMessage(message.Message.Id)));
+                    new ShardEnvelope(message.SenderPhone, new DeliverMessage(message.Sms.Id)));
             });
 
             Receive<DeliverMessage>(message =>
             {
-                if (_sentItems.ContainsKey(message.MessageId))
-                    _sentItems[message.MessageId].SetAsDelivered();
+                if (_sentSmse.ContainsKey(message.MessageId))
+                    _sentSmse[message.MessageId].SetAsDelivered();
             });
 
             #endregion
 
             #region Edit
 
-            Receive<EditMessage>(message =>
+            Receive<EditSmsMessage>(message =>
             {
-                if (_sentItems.ContainsKey(message.MessageId))
+                if (_sentSmse.ContainsKey(message.SmsId))
                 {
-                    _messageSessionHandler.ShardRegion.Tell(
-                        new ShardEnvelope(message.DestinationPhone, new ReciveEditMessage(message.MessageId, message.Message)));
+                    var response = _messageSessionHandler.ShardRegion.Ask<SmsResponse>(
+                        new ShardEnvelope(message.DestinationPhone, new ReciveEditSmsMessage(message.SmsId, message.Message)));
+                    Sender.Tell(response);
                 }
             });
 
-            Receive<ReciveEditMessage>(message =>
+            Receive<ReciveEditSmsMessage>(message =>
             {
-                if (_rcvdItems.ContainsKey(message.MessageId))
-                    _rcvdItems[message.MessageId].SetMessage(message.Message);
+                if (_rcvdSms.TryGetValue(message.SmsId, out var rcvdSms)) 
+                {
+                    _rcvdSms[message.SmsId].SetMessage(message.Text);
+                    
+                    _messageSessionHandler.ShardRegion.Tell(
+                        new ShardEnvelope(rcvdSms.SenderPhone, new AckReciveEditSmsMessage(message.SmsId, message.Text)));
+
+                    Sender.Tell(new SmsResponse()
+                    {
+                        Id = rcvdSms.Sms.Id,
+                        CreatedDate = rcvdSms.Sms.CreatedDate,
+                        DeliveredDate = rcvdSms.Sms.DeliveredDate,
+                        ModifiedDate = rcvdSms.Sms.ModifiedDate,
+                        ReadDate = rcvdSms.Sms.ReadDate,
+                        ReciverPhone = Phone,
+                        SenderPhone = rcvdSms.SenderPhone,
+                        Status = rcvdSms.Sms.Status,
+                        Text = rcvdSms.Sms.Text,
+                    });
+                }
             });
 
-            Receive<AckReciveEditMessage>(message =>
+            Receive<AckReciveEditSmsMessage>(message =>
             {
-                if (_sentItems.ContainsKey(message.MessageId))
-                    _sentItems[message.MessageId].SetMessage(message.Message);
+                if (_sentSmse.ContainsKey(message.MessageId))
+                    _sentSmse[message.MessageId].SetMessage(message.Message);
             });
 
             #endregion
 
             #region Read
 
-            Receive<ReadNewMessages>(message =>
+            Receive<ReadNewSmsesMessage>(message =>
             {
-                var newMessages = _rcvdItems
+                var newMessages = _rcvdSms
                     .Select(a => a.Value)
-                        .Where(a => a.Message.Status == Message.MessageStatus.Delivered)
+                        .Where(a => a.Sms.Status == Sms.SmsStatus.Delivered)
                             .ToList();
 
                 foreach(var msg in newMessages)
                 {
                     msg.SetAsRead();
-                    _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewMessages(msg.Message.Id)));
+                    _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
                 }
 
-                var result = newMessages.Select(a => new MessageResponse()
+                var result = newMessages.Select(a => new SmsResponse()
                 {
-                    CreatedDate = a.Message.CreatedDate,
+                    CreatedDate = a.Sms.CreatedDate,
                     ReciverPhone = Phone,
                     SenderPhone = a.SenderPhone,
-                    Id = a.Message.Id,
-                    ModifiedDate = a.Message.ModifiedDate,
-                    Status = a.Message.Status,
-                    Value = a.Message.Value,
-                    DeliveredDate = a.Message.DeliveredDate,
-                    ReadDate = a.Message.ReadDate
+                    Id = a.Sms.Id,
+                    ModifiedDate = a.Sms.ModifiedDate,
+                    Status = a.Sms.Status,
+                    Text = a.Sms.Text,
+                    DeliveredDate = a.Sms.DeliveredDate,
+                    ReadDate = a.Sms.ReadDate
                 });
 
                 Sender.Tell(result);
             });
 
-            Receive<ReadAllMessages>(message =>
+            Receive<ReadAllSmsesMessage>(message =>
             {
-                var allMessages = _rcvdItems
+                var allMessages = _rcvdSms
                     .Select(a => a.Value).ToList();
 
                 foreach (var msg in allMessages)
                 {
-                    if (msg.Message.Status != Message.MessageStatus.Read)
+                    if (msg.Sms.Status != Sms.SmsStatus.Read)
                     {
                         msg.SetAsRead();
-                        _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewMessages(msg.Message.Id)));
+                        _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
                     }
                 }
 
-                var result = allMessages.Select(a => new MessageResponse()
+                var result = allMessages.Select(a => new SmsResponse()
                 {
-                    CreatedDate = a.Message.CreatedDate,
+                    CreatedDate = a.Sms.CreatedDate,
                     ReciverPhone = Phone,
                     SenderPhone = a.SenderPhone,
-                    Id = a.Message.Id,
-                    ModifiedDate = a.Message.ModifiedDate,
-                    Status = a.Message.Status,
-                    Value = a.Message.Value,
-                    DeliveredDate = a.Message.DeliveredDate,
-                    ReadDate = a.Message.ReadDate
+                    Id = a.Sms.Id,
+                    ModifiedDate = a.Sms.ModifiedDate,
+                    Status = a.Sms.Status,
+                    Text = a.Sms.Text,
+                    DeliveredDate = a.Sms.DeliveredDate,
+                    ReadDate = a.Sms.ReadDate
                 });
 
                 Sender.Tell(result);
             });
 
-            Receive<AckReadNewMessages>(message =>
+            Receive<AckReadNewSmsMessage>(message =>
             {
-                if (_sentItems.ContainsKey(message.MessageId))
-                    _sentItems[message.MessageId].SetAsRead();
+                if (_sentSmse.ContainsKey(message.MessageId))
+                    _sentSmse[message.MessageId].SetAsRead();
             });
 
             #endregion
@@ -149,37 +168,37 @@ namespace Service.Api.Actors
 
         public abstract class BaseMessage
         {
-            public BaseMessage(Message message)
+            public BaseMessage(Sms message)
             {
-                Message = message;
+                Sms = message;
             }
 
-            public Message Message { get; }
+            public Sms Sms { get; }
 
             public void SetAsDelivered()
             {
-                Message.Status = Message.MessageStatus.Delivered;
-                Message.DeliveredDate = DateTime.Now;
+                Sms.Status = Sms.SmsStatus.Delivered;
+                Sms.DeliveredDate = DateTime.Now;
             }
 
             public void SetAsRead()
             {
-                Message.Status = Message.MessageStatus.Read;
-                Message.ReadDate = DateTime.Now;
+                Sms.Status = Sms.SmsStatus.Read;
+                Sms.ReadDate = DateTime.Now;
             }
 
             public void SetMessage(string message)
             {
-                Message.Value = message;
-                Message.ModifiedDate = DateTime.Now;
+                Sms.Text = message;
+                Sms.ModifiedDate = DateTime.Now;
             }
         }
 
         #region Send/Recive Classes
 
-        public class SendMessage : BaseMessage
+        public sealed class SendSmsMessage : BaseMessage
         {
-            public SendMessage(string destinationPhone, Message message) : base(message)
+            public SendSmsMessage(string destinationPhone, Sms message) : base(message)
             {
                 DestinationPhone = destinationPhone;
             }
@@ -187,19 +206,19 @@ namespace Service.Api.Actors
             public string DestinationPhone { get; }
         }
 
-        public class DeliverMessage
+        public sealed class DeliverMessage
         {
             public DeliverMessage(Guid messageId)
             {
                 MessageId = messageId;
             }
 
-            public Guid MessageId { get; set; }
+            public Guid MessageId { get; }
         }
 
-        public class ReciveMessage : BaseMessage
+        public sealed class ReciveSmsMessage : BaseMessage
         {
-            public ReciveMessage(string senderPhone, Message message) : base(message)
+            public ReciveSmsMessage(string senderPhone, Sms message) : base(message)
             {
                 SenderPhone = senderPhone;
             }
@@ -211,65 +230,59 @@ namespace Service.Api.Actors
 
         #region Edit Classes
 
-        public class EditMessage
+        public sealed class EditSmsMessage
         {
-            public EditMessage(Guid messageId, string destinationPhone, string message)
+            public EditSmsMessage(Guid messageId, string destinationPhone, string message)
             {
-                MessageId = messageId;
+                SmsId = messageId;
                 Message = message;
                 DestinationPhone = destinationPhone;
             }
 
-            public Guid MessageId { get; }
-            public string Message { get; set; }
-            public string DestinationPhone { get; set; }
+            public Guid SmsId { get; }
+            public string Message { get; }
+            public string DestinationPhone { get; }
         }
 
-        public class ReciveEditMessage
+        public sealed class ReciveEditSmsMessage
         {
-            public ReciveEditMessage(Guid messageId, string message)
+            public ReciveEditSmsMessage(Guid messageId, string message)
+            {
+                SmsId = messageId;
+                Text = message;
+            }
+
+            public Guid SmsId { get; }
+            public string Text { get; }
+        }
+
+        public sealed class AckReciveEditSmsMessage
+        {
+            public AckReciveEditSmsMessage(Guid messageId, string message)
             {
                 MessageId = messageId;
                 Message = message;
             }
 
             public Guid MessageId { get; }
-            public string Message { get; set; }
-        }
-
-        public class AckReciveEditMessage
-        {
-            public AckReciveEditMessage(Guid messageId, string message)
-            {
-                MessageId = messageId;
-                Message = message;
-            }
-
-            public Guid MessageId { get; }
-            public string Message { get; set; }
+            public string Message { get; }
         }
 
         #endregion
 
         #region Read Classes
 
-        public sealed class ReadAllMessages
+        public sealed class ReadAllSmsesMessage
         {
-            public ReadAllMessages()
-            {
-            }
         }
 
-        public sealed class ReadNewMessages
+        public sealed class ReadNewSmsesMessage
         {
-            public ReadNewMessages()
-            {
-            }
         }
 
-        public sealed class AckReadNewMessages
+        public sealed class AckReadNewSmsMessage
         {
-            public AckReadNewMessages(Guid messageId)
+            public AckReadNewSmsMessage(Guid messageId)
             {
                 MessageId = messageId;
             }

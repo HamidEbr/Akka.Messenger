@@ -1,6 +1,8 @@
 ﻿using Akka.Actor;
+using Akka.Cluster.Metrics;
 using Akka.Cluster.Sharding;
 using Akka.Configuration;
+using Petabridge.Cmd.Host;
 using Service.Api.Actors;
 using Service.Api.Helper;
 
@@ -21,6 +23,8 @@ namespace Service.Api.Services
     public sealed class AkkaService : IHostedService, IMessageSessionHandler
     {
         private ActorSystem _system;
+        private PetabridgeCmd _cmd;
+
         public IActorRef ShardRegion { get; private set; }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -28,6 +32,9 @@ namespace Service.Api.Services
             var config = ConfigurationFactory.ParseString(await File.ReadAllTextAsync("app.conf", cancellationToken));
             _system = ActorSystem.Create("messenger-system", config);
 
+            _cmd = PetabridgeCmd.Get(_system);
+            _cmd.Start();
+            var cluster = Akka.Cluster.Cluster.Get(_system);
             ShardRegion = await ClusterSharding.Get(_system).StartAsync(
                 typeName: "user",
                 entityPropsFactory: entityId => Props.Create<User>(this, entityId),
@@ -40,7 +47,7 @@ namespace Service.Api.Services
             await _system.Terminate();
         }
 
-        public void Handle(object msg)
+        public void Tell(object msg)
         {
             ShardRegion.Tell(msg);
         }

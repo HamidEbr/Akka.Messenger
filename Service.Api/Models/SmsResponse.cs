@@ -1,16 +1,16 @@
 ﻿namespace Service.Api.Models
 {
-    public class MessageResponse
+    public class SmsResponse
     {
-        public MessageResponse()
+        public SmsResponse()
         {
         }
 
         public Guid Id { get; set; }
-        public string Value { get; set; }
+        public string Text { get; set; }
         public DateTime CreatedDate { get; set; }
         public DateTime? ModifiedDate { get; set; }
-        public Message.MessageStatus Status { get; set; }
+        public Sms.SmsStatus Status { get; set; }
         public string SenderPhone { get; set; }
         public string ReciverPhone { get; set; }
         public DateTime? DeliveredDate { get; set; }
@@ -18,7 +18,7 @@
 
         public override string ToString()
         {
-            return $"{Id}\t{Value}\t{Status}";
+            return $"{Id}\t{Text}\t{Status}";
         }
     }
 }

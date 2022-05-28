@@ -1,36 +1,39 @@
 ﻿using Akka.Actor;
-using Service.Api.Helper;
-using Service.Api.Models;
-using Service.Api.Services;
+using Akka.Event;
+using Akka.Hosting;
+using Akka.Messenger.Shared.Models;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 
-namespace Service.Api.Actors
+namespace Akka.Messenger.Shared.Sharding
 {
-    public class User : ReceiveActor
+    public class UserEntity : ReceiveActor
     {
-        private Dictionary<Guid, SendSmsMessage> _sentSmse;
+        private Dictionary<Guid, SendSmsMessage> _sentSms;
         private Dictionary<Guid, ReciveSmsMessage> _rcvdSms;
-        private readonly IMessageSessionHandler _messageSessionHandler;
-        
-        public string Phone { get; }
 
-
-        public User(IMessageSessionHandler messageSessionHandler, string userPhone)
+        public static Props Props(string userId)
         {
-            Phone = userPhone;
-            _messageSessionHandler = messageSessionHandler;
-            _sentSmse = new Dictionary<Guid, SendSmsMessage>();
-            _rcvdSms = new Dictionary<Guid, ReciveSmsMessage>();
-            UserAvailable();
+            return Actor.Props.Create(() => new UserEntity(userId));
         }
 
-        private void UserAvailable()
+        public UserEntity(string phoneNumber)
         {
+            _sentSms = new Dictionary<Guid, SendSmsMessage>();
+            _rcvdSms = new Dictionary<Guid, ReciveSmsMessage>();
+            PhoneNumber = phoneNumber;
+            _actorRegistry = ActorRegistry.For(Context.System);
+
             #region Send
 
             Receive<SendSmsMessage>(message =>
             {
-                _sentSmse.Add(message.Sms.Id, message);
-                _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(message.DestinationPhone, new ReciveSmsMessage(Phone, message.Sms)));
+                _sentSms.Add(message.Sms.Id, message);
+                _actorRegistry.Get<UserEntity>()
+                    .Tell(new ShardEnvelope(message.DestinationPhone, new ReciveSmsMessage(PhoneNumber, message.Sms)));
                 Sender.Tell(message.Sms.Id);
             });
 
@@ -38,38 +41,43 @@ namespace Service.Api.Actors
             {
                 message.SetAsDelivered();
                 _rcvdSms.Add(message.Sms.Id, message);
-                _messageSessionHandler.ShardRegion.Tell(
-                    new ShardEnvelope(message.SenderPhone, new DeliverMessage(message.Sms.Id)));
+                _actorRegistry.Get<UserEntity>()
+                    .Tell(new ShardEnvelope(message.SenderPhone, new DeliverMessage(message.Sms.Id)));
             });
 
             Receive<DeliverMessage>(message =>
             {
-                if (_sentSmse.ContainsKey(message.MessageId))
-                    _sentSmse[message.MessageId].SetAsDelivered();
+                if (_sentSms.ContainsKey(message.MessageId))
+                    _sentSms[message.MessageId].SetAsDelivered();
             });
 
             #endregion
 
             #region Edit
 
-            Receive<EditSmsMessage>(message =>
+            ReceiveAsync<EditSmsMessage>(async message =>
             {
-                if (_sentSmse.ContainsKey(message.SmsId))
+                if (_sentSms.ContainsKey(message.SmsId))
                 {
-                    var response = _messageSessionHandler.ShardRegion.Ask<SmsResponse>(
+                    var response = await _actorRegistry.Get<UserEntity>().Ask<SmsResponse>(
                         new ShardEnvelope(message.DestinationPhone, new ReciveEditSmsMessage(message.SmsId, message.Message)));
+
+                    if (_sentSms.ContainsKey(response.Id))
+                        _sentSms[message.SmsId].SetMessage(message.Message);
+
                     Sender.Tell(response);
+                }
+                else
+                {
+                    throw new Exception("Sms not found");
                 }
             });
 
-            Receive<ReciveEditSmsMessage>(message =>
+            ReceiveAsync<ReciveEditSmsMessage>(async message =>
             {
-                if (_rcvdSms.TryGetValue(message.SmsId, out var rcvdSms)) 
+                if (_rcvdSms.TryGetValue(message.SmsId, out var rcvdSms))
                 {
                     _rcvdSms[message.SmsId].SetMessage(message.Text);
-                    
-                    _messageSessionHandler.ShardRegion.Tell(
-                        new ShardEnvelope(rcvdSms.SenderPhone, new AckReciveEditSmsMessage(message.SmsId, message.Text)));
 
                     Sender.Tell(new SmsResponse()
                     {
@@ -78,18 +86,12 @@ namespace Service.Api.Actors
                         DeliveredDate = rcvdSms.Sms.DeliveredDate,
                         ModifiedDate = rcvdSms.Sms.ModifiedDate,
                         ReadDate = rcvdSms.Sms.ReadDate,
-                        ReciverPhone = Phone,
+                        ReciverPhone = PhoneNumber,
                         SenderPhone = rcvdSms.SenderPhone,
                         Status = rcvdSms.Sms.Status,
                         Text = rcvdSms.Sms.Text,
                     });
                 }
-            });
-
-            Receive<AckReciveEditSmsMessage>(message =>
-            {
-                if (_sentSmse.ContainsKey(message.MessageId))
-                    _sentSmse[message.MessageId].SetMessage(message.Message);
             });
 
             #endregion
@@ -103,16 +105,17 @@ namespace Service.Api.Actors
                         .Where(a => a.Sms.Status == Sms.SmsStatus.Delivered)
                             .ToList();
 
-                foreach(var msg in newMessages)
+                foreach (var msg in newMessages)
                 {
                     msg.SetAsRead();
-                    _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
+                    _actorRegistry.Get<UserEntity>()
+                        .Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
                 }
 
                 var result = newMessages.Select(a => new SmsResponse()
                 {
                     CreatedDate = a.Sms.CreatedDate,
-                    ReciverPhone = Phone,
+                    ReciverPhone = PhoneNumber,
                     SenderPhone = a.SenderPhone,
                     Id = a.Sms.Id,
                     ModifiedDate = a.Sms.ModifiedDate,
@@ -135,14 +138,15 @@ namespace Service.Api.Actors
                     if (msg.Sms.Status != Sms.SmsStatus.Read)
                     {
                         msg.SetAsRead();
-                        _messageSessionHandler.ShardRegion.Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
+                        _actorRegistry.Get<UserEntity>()
+                            .Tell(new ShardEnvelope(msg.SenderPhone, new AckReadNewSmsMessage(msg.Sms.Id)));
                     }
                 }
 
                 var result = allMessages.Select(a => new SmsResponse()
                 {
                     CreatedDate = a.Sms.CreatedDate,
-                    ReciverPhone = Phone,
+                    ReciverPhone = PhoneNumber,
                     SenderPhone = a.SenderPhone,
                     Id = a.Sms.Id,
                     ModifiedDate = a.Sms.ModifiedDate,
@@ -157,12 +161,22 @@ namespace Service.Api.Actors
 
             Receive<AckReadNewSmsMessage>(message =>
             {
-                if (_sentSmse.ContainsKey(message.MessageId))
-                    _sentSmse[message.MessageId].SetAsRead();
+                if (_sentSms.ContainsKey(message.MessageId))
+                    _sentSms[message.MessageId].SetAsRead();
             });
 
             #endregion
+
+            Receive<object>(o =>
+            {
+            });
         }
+
+        private readonly ILoggingAdapter _log = Context.GetLogger();
+
+        public string PhoneNumber { get; }
+
+        private readonly ActorRegistry _actorRegistry;
 
         #region Messages
 
@@ -254,18 +268,6 @@ namespace Service.Api.Actors
 
             public Guid SmsId { get; }
             public string Text { get; }
-        }
-
-        public sealed class AckReciveEditSmsMessage
-        {
-            public AckReciveEditSmsMessage(Guid messageId, string message)
-            {
-                MessageId = messageId;
-                Message = message;
-            }
-
-            public Guid MessageId { get; }
-            public string Message { get; }
         }
 
         #endregion

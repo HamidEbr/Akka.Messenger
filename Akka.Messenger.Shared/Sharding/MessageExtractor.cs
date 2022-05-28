@@ -1,6 +1,6 @@
 ﻿using Akka.Cluster.Sharding;
 
-namespace Service.Api.Helper
+namespace Akka.Messenger.Shared.Sharding
 {
     public sealed class ShardEnvelope
     {
@@ -16,7 +16,7 @@ namespace Service.Api.Helper
 
     public sealed class MessageExtractor : HashCodeMessageExtractor
     {
-        public MessageExtractor(int maxNumberOfShards) : base(maxNumberOfShards)
+        public MessageExtractor() : base(30)
         {
         }
 

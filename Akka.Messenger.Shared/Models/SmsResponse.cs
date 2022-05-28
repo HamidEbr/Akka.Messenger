@@ -1,4 +1,4 @@
-﻿namespace Service.Api.Models
+﻿namespace Akka.Messenger.Shared.Models
 {
     public class SmsResponse
     {

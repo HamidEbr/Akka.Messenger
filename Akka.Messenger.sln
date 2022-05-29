@@ -9,7 +9,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Akka.Messenger.Host", "Akka
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Akka.Messenger.Shared", "Akka.Messenger.Shared\Akka.Messenger.Shared.csproj", "{AED4D19B-8688-4684-9B19-80FAB495455F}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Akka.Messenger.Test", "Akka.Messenger.Test\Akka.Messenger.Test.csproj", "{0BE37764-47BA-4504-B195-8A4C6F621736}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Akka.Messenger.Tests", "Akka.Messenger.Tests\Akka.Messenger.Tests.csproj", "{DCFE784C-C3E4-46CC-84EF-16A9E442C7D2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,10 +29,10 @@ Global
 		{AED4D19B-8688-4684-9B19-80FAB495455F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AED4D19B-8688-4684-9B19-80FAB495455F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AED4D19B-8688-4684-9B19-80FAB495455F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{0BE37764-47BA-4504-B195-8A4C6F621736}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0BE37764-47BA-4504-B195-8A4C6F621736}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0BE37764-47BA-4504-B195-8A4C6F621736}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0BE37764-47BA-4504-B195-8A4C6F621736}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DCFE784C-C3E4-46CC-84EF-16A9E442C7D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DCFE784C-C3E4-46CC-84EF-16A9E442C7D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DCFE784C-C3E4-46CC-84EF-16A9E442C7D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DCFE784C-C3E4-46CC-84EF-16A9E442C7D2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

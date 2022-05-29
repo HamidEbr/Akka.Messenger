@@ -9,16 +9,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Remove="app.conf" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="app.conf">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Akka" Version="1.4.38" />
     <PackageReference Include="Akka.Cluster.Hosting" Version="0.3.0" />
     <PackageReference Include="Akka.Cluster.Metrics" Version="1.4.38" />

@@ -23,7 +23,7 @@ var builder = new HostBuilder()
                     Address.Parse("akka.tcp://messenger-system@localhost:7919") ,
                     Address.Parse("akka.tcp://messenger-system@127.0.0.1:4053") }
                 })
-                .WithShardRegion<UserEntity>("userActions", s => Props.Create(() => new UserEntity(s)),
+                .WithShardRegion<UserEntity>("userActions", s => UserEntity.Props(s),
                     new MessageExtractor(),
                     new ShardOptions()
                     {

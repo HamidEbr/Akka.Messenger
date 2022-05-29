@@ -8,6 +8,11 @@ namespace Akka.Messenger.Shared.Sharding
         private readonly ILoggingAdapter _log = Context.GetLogger();
         private readonly IActorRef _userActionsShardRegion;
 
+        public static Props Props(IActorRef userActionsShardRegion)
+        {
+            return Actor.Props.Create(() => new UserProxy(userActionsShardRegion));
+        }
+
         public UserProxy(IActorRef userActionsShardRegion)
         {
             _userActionsShardRegion = userActionsShardRegion;
@@ -22,10 +27,10 @@ namespace Akka.Messenger.Shared.Sharding
                 m.Payload is UserEntity.ReadAllSmsesMessage || 
                 m.Payload is UserEntity.EditSmsMessage);
 
-            ReceiveAnyAsync(async o =>
+            ReceiveAny(o =>
             {
                 _userActionsShardRegion.Tell(o);
-                //_log.Warning("Unknown message: {0}", o);
+                _log.Warning("Unknown message: {0}", o);
             });
         }
     }

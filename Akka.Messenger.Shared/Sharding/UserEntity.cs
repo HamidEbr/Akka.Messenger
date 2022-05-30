@@ -13,42 +13,83 @@ namespace Akka.Messenger.Shared.Sharding
     public class UserEntity : ReceiveActor
     {
         private Dictionary<Guid, SendSmsMessage> _sentSms;
-        private Dictionary<Guid, ReciveSmsMessage> _rcvdSms;
+        private Dictionary<Guid, ReceiveSmsMessage> _rcvdSms;
+        private readonly ActorRegistry _actorRegistry;
+        private readonly ILoggingAdapter _log = Context.GetLogger();
+        private IActorRef _destinationActor; //only for testing
+        
+        public string PhoneNumber { get; }
 
+        /// <summary>
+        /// only used for test porposes
+        /// </summary>
+        /// <param name="userId">phone number of user</param>
+        /// <param name="destinationActor">destination test probe</param>
+        /// <returns></returns>
+        public static Props Props(string userId, IActorRef destinationActor)
+        {
+            return Actor.Props.Create(() => new UserEntity(userId, destinationActor));
+        }
+
+        /// <summary>
+        /// only used for test porposes
+        /// </summary>
+        /// <param name="userId">phone number of user</param>
+        /// <param name="destinationActor">destination test probe</param>
+        public UserEntity(string phoneNumber, IActorRef destinationActor)
+        {
+            _destinationActor = destinationActor;
+            PhoneNumber = phoneNumber;
+            Initializer();
+        }
+        
         public static Props Props(string userId)
         {
             return Actor.Props.Create(() => new UserEntity(userId));
         }
 
-        private UserEntity(string phoneNumber)
+        public UserEntity(string phoneNumber)
+        {
+            _actorRegistry = ActorRegistry.For(Context.System);
+            PhoneNumber = phoneNumber;
+            Initializer();
+        }
+
+        private void Initializer()
         {
             _sentSms = new Dictionary<Guid, SendSmsMessage>();
-            _rcvdSms = new Dictionary<Guid, ReciveSmsMessage>();
-            PhoneNumber = phoneNumber;
-            _actorRegistry = ActorRegistry.For(Context.System);
+            _rcvdSms = new Dictionary<Guid, ReceiveSmsMessage>();
 
             #region Send
 
             Receive<SendSmsMessage>(message =>
             {
                 _sentSms.Add(message.Sms.Id, message);
-                _actorRegistry.Get<UserEntity>()
-                    .Tell(new ShardEnvelope(message.DestinationPhone, ReciveSmsMessage.Create(PhoneNumber, message.Sms)));
+                DestinationActor()
+                    .Tell(new ShardEnvelope(message.DestinationPhone, ReceiveSmsMessage.Create(PhoneNumber, message.Sms)));
                 Sender.Tell(message.Sms.Id);
             });
 
-            Receive<ReciveSmsMessage>(message =>
+            Receive<ReceiveSmsMessage>(message =>
             {
                 message.SetAsDelivered();
                 _rcvdSms.Add(message.Sms.Id, message);
-                _actorRegistry.Get<UserEntity>()
+                DestinationActor()
                     .Tell(new ShardEnvelope(message.SenderPhone, DeliverMessage.Create(message.Sms.Id)));
+                Sender.Tell(ReceiveSmsMessageSuccess.Create(message.Sms.Id));
             });
 
             Receive<DeliverMessage>(message =>
             {
                 if (_sentSms.ContainsKey(message.MessageId))
+                {
                     _sentSms[message.MessageId].SetAsDelivered();
+                    Sender.Tell(DeliverMessageSuccess.Instance());
+                }
+                else
+                {
+                    Sender.Tell(SmsNotFound.Create(message.MessageId));
+                }
             });
 
             #endregion
@@ -59,21 +100,19 @@ namespace Akka.Messenger.Shared.Sharding
             {
                 if (_sentSms.ContainsKey(message.SmsId))
                 {
-                    var response = await _actorRegistry.Get<UserEntity>().Ask<SmsResponse>(
+                    var response = await DestinationActor().Ask<SmsResponse>(
                         new ShardEnvelope(message.DestinationPhone, ReciveEditSmsMessage.Create(message.SmsId, message.Message)));
 
-                    if (_sentSms.ContainsKey(response.Id))
-                        _sentSms[message.SmsId].SetMessage(message.Message);
-
+                    _sentSms[message.SmsId].SetMessage(message.Message);
                     Sender.Tell(response);
                 }
                 else
                 {
-                    Sender.Tell(SmsNotFound.Instance());
+                    Sender.Tell(SmsNotFound.Create(message.SmsId));
                 }
             });
 
-            ReceiveAsync<ReciveEditSmsMessage>(async message =>
+            Receive<ReciveEditSmsMessage>(message =>
             {
                 if (_rcvdSms.TryGetValue(message.SmsId, out var rcvdSms))
                 {
@@ -86,11 +125,15 @@ namespace Akka.Messenger.Shared.Sharding
                         DeliveredDate = rcvdSms.Sms.DeliveredDate,
                         ModifiedDate = rcvdSms.Sms.ModifiedDate,
                         ReadDate = rcvdSms.Sms.ReadDate,
-                        ReciverPhone = PhoneNumber,
+                        ReceiverPhone = PhoneNumber,
                         SenderPhone = rcvdSms.SenderPhone,
                         Status = rcvdSms.Sms.Status,
                         Text = rcvdSms.Sms.Text,
                     });
+                }
+                else
+                {
+                    Sender.Tell(SmsNotFound.Create(message.SmsId));
                 }
             });
 
@@ -108,14 +151,14 @@ namespace Akka.Messenger.Shared.Sharding
                 foreach (var msg in newMessages)
                 {
                     msg.SetAsRead();
-                    _actorRegistry.Get<UserEntity>()
+                    DestinationActor()
                         .Tell(new ShardEnvelope(msg.SenderPhone, AckReadNewSmsMessage.Create(msg.Sms.Id)));
                 }
 
                 var result = newMessages.Select(a => new SmsResponse()
                 {
                     CreatedDate = a.Sms.CreatedDate,
-                    ReciverPhone = PhoneNumber,
+                    ReceiverPhone = PhoneNumber,
                     SenderPhone = a.SenderPhone,
                     Id = a.Sms.Id,
                     ModifiedDate = a.Sms.ModifiedDate,
@@ -138,7 +181,7 @@ namespace Akka.Messenger.Shared.Sharding
                     if (msg.Sms.Status != Sms.SmsStatus.Read)
                     {
                         msg.SetAsRead();
-                        _actorRegistry.Get<UserEntity>()
+                        DestinationActor()
                             .Tell(new ShardEnvelope(msg.SenderPhone, AckReadNewSmsMessage.Create(msg.Sms.Id)));
                     }
                 }
@@ -146,7 +189,7 @@ namespace Akka.Messenger.Shared.Sharding
                 var result = allMessages.Select(a => new SmsResponse()
                 {
                     CreatedDate = a.Sms.CreatedDate,
-                    ReciverPhone = PhoneNumber,
+                    ReceiverPhone = PhoneNumber,
                     SenderPhone = a.SenderPhone,
                     Id = a.Sms.Id,
                     ModifiedDate = a.Sms.ModifiedDate,
@@ -162,7 +205,14 @@ namespace Akka.Messenger.Shared.Sharding
             Receive<AckReadNewSmsMessage>(message =>
             {
                 if (_sentSms.ContainsKey(message.MessageId))
+                {
                     _sentSms[message.MessageId].SetAsRead();
+                    Sender.Tell(AckReadNewSmsMessageSuccess.Create(message.MessageId));
+                }
+                else
+                {
+                    Sender.Tell(SmsNotFound.Create(message.MessageId));
+                }
             });
 
             #endregion
@@ -172,11 +222,12 @@ namespace Akka.Messenger.Shared.Sharding
             });
         }
 
-        private readonly ILoggingAdapter _log = Context.GetLogger();
-
-        public string PhoneNumber { get; }
-
-        private readonly ActorRegistry _actorRegistry;
+        private IActorRef DestinationActor()
+        {
+            if (_destinationActor != null)
+                return _destinationActor;
+            return _actorRegistry.Get<UserEntity>();
+        }
 
         #region Messages
 
@@ -240,14 +291,14 @@ namespace Akka.Messenger.Shared.Sharding
             public Guid MessageId { get; }
         }
 
-        public sealed class ReciveSmsMessage : BaseMessage
+        public sealed class ReceiveSmsMessage : BaseMessage
         {
-            public static ReciveSmsMessage Create(string senderPhone, Sms message)
+            public static ReceiveSmsMessage Create(string senderPhone, Sms message)
             {
-                return new ReciveSmsMessage(senderPhone, message);
+                return new ReceiveSmsMessage(senderPhone, message);
             }
 
-            private ReciveSmsMessage(string senderPhone, Sms message) : base(message)
+            private ReceiveSmsMessage(string senderPhone, Sms message) : base(message)
             {
                 SenderPhone = senderPhone;
             }
@@ -331,6 +382,47 @@ namespace Akka.Messenger.Shared.Sharding
 
         #endregion
 
+        #region Success Responses
+        
+        public abstract class BaseSuccessResponse
+        {
+        }
+
+        public sealed class AckReadNewSmsMessageSuccess : BaseSuccessResponse
+        {
+            public Guid Id { get; }
+
+            public static AckReadNewSmsMessageSuccess Create(Guid id) => new(id);
+
+            private AckReadNewSmsMessageSuccess(Guid id)
+            {
+                Id = id;
+            }
+        }
+
+        public sealed class ReceiveSmsMessageSuccess : BaseSuccessResponse
+        {
+            public Guid Id { get; }
+            
+            public static ReceiveSmsMessageSuccess Create(Guid id) => new(id);
+
+            private ReceiveSmsMessageSuccess(Guid id)
+            {
+                Id = id;
+            }
+        }        
+
+        public sealed class DeliverMessageSuccess : BaseSuccessResponse
+        {
+            public static DeliverMessageSuccess Instance() => new();
+
+            private DeliverMessageSuccess()
+            {
+            }
+        }
+
+        #endregion
+
         #region Error Responses
 
         public abstract class BaseErrorResponse
@@ -345,9 +437,13 @@ namespace Akka.Messenger.Shared.Sharding
 
         public sealed class SmsNotFound : BaseErrorResponse
         {
-            public static SmsNotFound Instance() => new();
+            public Guid Id { get; }
+
+            public static SmsNotFound Create(Guid id) => new(id);
             
-            private SmsNotFound() : base("Sms Not found!") { }
+            private SmsNotFound(Guid id) : base($"Sms {id} Not found!") {
+                Id = id;
+            }
         }
 
         #endregion

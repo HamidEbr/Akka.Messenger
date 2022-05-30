@@ -12,7 +12,7 @@
         public DateTime? ModifiedDate { get; set; }
         public Sms.SmsStatus Status { get; set; }
         public string SenderPhone { get; set; }
-        public string ReciverPhone { get; set; }
+        public string ReceiverPhone { get; set; }
         public DateTime? DeliveredDate { get; set; }
         public DateTime? ReadDate { get; set; }
 

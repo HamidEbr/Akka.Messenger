@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -8,7 +8,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Remove="appsettings.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Akka.Cluster.Hosting" Version="0.3.0" />
+    <PackageReference Include="Petabridge.Cmd.Cluster" Version="1.0.2" />
+    <PackageReference Include="Petabridge.Cmd.Cluster.Sharding" Version="1.0.2" />
+    <PackageReference Include="Petabridge.Cmd.Host" Version="1.0.2" />
   </ItemGroup>
 
   <ItemGroup>

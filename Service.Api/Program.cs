@@ -6,6 +6,7 @@ using Akka.Messenger.Shared.Models;
 using Akka.Messenger.Shared.Sharding;
 using Akka.Remote.Hosting;
 using Service.Api.Models;
+using System.Collections.Immutable;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +17,8 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddAkka("messenger-system", configurationBuilder =>
 {
+    //ActorSystem actorSystem = ActorSystem.Create("messenger-system");
+    
     configurationBuilder
         .WithRemoting("localhost", 0)
         .WithClustering(new ClusterOptions()
@@ -64,6 +67,26 @@ app.MapGet("/read_new_messages/phone-number/{phoneNumber}", async (ActorRegistry
     var result = await index.Ask<IEnumerable<SmsResponse>>(new ShardEnvelope(phoneNumber,
         UserEntity.ReadNewSmsesMessage.Instance()));
     return Results.Ok(result);
+});
+
+app.MapGet("shard_stats",(ActorRegistry registry) =>
+{
+    var index = registry.Get<Index>();
+    //ActorSystem system= new 
+    //var clusterSharding = new ClusterSharding(index.sys);
+
+    GetClusterShardingStats getClusterShardingStats = new(TimeSpan.FromMinutes(2));
+    Dictionary<Address, ShardRegionStats> dictionary = new();
+    var stats = new ShardRegionStats(ImmutableDictionary<string, int>.Empty.Add("a", 23));
+    
+    dictionary.Add(Address.Parse("akka.tcp://messenger-system@localhost:7919"), stats);
+    IImmutableDictionary<Address, ShardRegionStats> regions = dictionary.ToImmutableDictionary();
+
+    ClusterShardingStats clusterShardingStats = new(regions);
+
+
+
+
 });
 
 app.MapGet("/read_all_messages/phone-number/{phoneNumber}", async (ActorRegistry registry, string phoneNumber) =>

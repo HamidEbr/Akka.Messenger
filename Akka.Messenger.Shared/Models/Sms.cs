@@ -9,10 +9,10 @@
             Read
         }
 
-        public Sms(string value)
+        public Sms(string text)
         {
             Id = Guid.NewGuid();
-            Text = value;
+            Text = text;
             CreatedDate = DateTime.Now;
             ModifiedDate = DateTime.Now;
             Status = SmsStatus.Sent;
